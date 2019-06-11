@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -19,22 +18,24 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
-// ALB access log format
+// regexpAlb - Regular expression for ALB access log format
 // https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-access-logs.html#access-log-entry-format
-const REGEXP_ALB = `(?P<type>.*?)\s(?P<timestamp>.*?)\s(?P<elb>.*?)\s(?P<client_port>.*?)\s(?P<target_port>.*?)\s(?P<request_processing_time>.*?)\s(?P<target_processing_time>.*?)\s(?P<response_processing_time>.*?)\s(?P<elb_status_code>.*?)\s(?P<target_status_code>.*?)\s(?P<received_bytes>.*?)\s(?P<send_bytes>.*?)\s"(?P<request>.*?)"\s"(?P<user_agent>.*?)"\s(?P<ssl_cipher>.*?)\s(?P<ssl_procotol>.*?)\s(?P<target_group_arn>.*?)\s"(?P<trace_id>.*?)"\s"(?P<domain_name>.*?)"\s"(?P<chosen_cert_an>.*?)"\s(?P<matched_rule_priority>.*?)\s(?P<request_creation_time>.*?)\s"(?P<actions_executed>.*?)"\s"(?P<redirect_url>.*?)"\s"(?P<error_reason>.*?)"`
+const regexpAlb = `(?P<type>.*?)\s(?P<timestamp>.*?)\s(?P<elb>.*?)\s(?P<client_port>.*?)\s(?P<target_port>.*?)\s(?P<request_processing_time>.*?)\s(?P<target_processing_time>.*?)\s(?P<response_processing_time>.*?)\s(?P<elb_status_code>.*?)\s(?P<target_status_code>.*?)\s(?P<received_bytes>.*?)\s(?P<send_bytes>.*?)\s"(?P<request>.*?)"\s"(?P<user_agent>.*?)"\s(?P<ssl_cipher>.*?)\s(?P<ssl_procotol>.*?)\s(?P<target_group_arn>.*?)\s"(?P<trace_id>.*?)"\s"(?P<domain_name>.*?)"\s"(?P<chosen_cert_an>.*?)"\s(?P<matched_rule_priority>.*?)\s(?P<request_creation_time>.*?)\s"(?P<actions_executed>.*?)"\s"(?P<redirect_url>.*?)"\s"(?P<error_reason>.*?)"`
 
-const REGEXP_LOGIN_URL = "https://.*:.*/([^/].*)/login"
+// regexpLoginURL - Regular expression for service login url
+const regexpLoginURL = "https://.*:.*/([^/].*)/login"
 
-// Datadog post metric name
-const DD_METRIC_NAME = "test.metric"
+// ddMetricName - Datadog post metric name
+const ddMetricName = "test.metric"
 
-// Datadog API parameters
-type DD_PARAM struct {
+// ddParam - Datadog API parameter
+type ddParam struct {
 	Metric string      `json:"metric"`
 	Points [1][2]int64 `json:"points"`
 	Type   string      `json:"type"`
@@ -42,10 +43,12 @@ type DD_PARAM struct {
 	Tags   []string    `json:"tags"`
 }
 
-type DD_PARAMS struct {
-	Series []DD_PARAM `json:"series"`
+// ddParams - Datadog API parameters
+type ddParams struct {
+	Series []ddParam `json:"series"`
 }
 
+// ReadGzFile - Read gzipped file
 func ReadGzFile(filename string) ([]byte, error) {
 	fmt.Sprintf("1 \n")
 	fi, err := os.Open(filename)
@@ -70,6 +73,7 @@ func ReadGzFile(filename string) ([]byte, error) {
 	return s, nil
 }
 
+// Groupmap - Mapping group name
 func Groupmap(s string, r *regexp.Regexp) map[string]string {
 	values := r.FindStringSubmatch(s)
 	keys := r.SubexpNames()
@@ -81,12 +85,14 @@ func Groupmap(s string, r *regexp.Regexp) map[string]string {
 	return d
 }
 
+// Tag - Return tag string
 func Tag(k string, v string) string {
 	return fmt.Sprintf("%s:%s", k, v)
 }
 
+// PostMetric - Post metric to datadog
 func PostMetric(m string, t int64, c string) (int, []byte, error) {
-	dd_params := DD_PARAMS{Series: []DD_PARAM{
+	ddParams := ddParams{Series: []ddParam{
 		{
 			Metric: m,
 			Points: [1][2]int64{
@@ -99,7 +105,7 @@ func PostMetric(m string, t int64, c string) (int, []byte, error) {
 			},
 		},
 	}}
-	jsonValue, _ := json.Marshal(dd_params)
+	jsonValue, _ := json.Marshal(ddParams)
 	url := fmt.Sprintf("https://api.datadoghq.com/api/v1/series?api_key=%s",
 		os.Getenv("DD_API_KEY"))
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(jsonValue))
@@ -120,10 +126,32 @@ func PostMetric(m string, t int64, c string) (int, []byte, error) {
 	return resp.StatusCode, body, nil
 }
 
+// AssumeRoleWithSession - Assume role
+func AssumeRoleWithSession(sess *session.Session, roleArn string) *session.Session {
+	sCreds := stscreds.NewCredentials(sess, roleArn)
+	sConfig := aws.Config{Region: sess.Config.Region, Credentials: sCreds}
+	sSess := session.New(&sConfig)
+	return sSess
+}
+
+// handler - Lambda handler
 func handler(ctx context.Context, s3Event events.S3Event) (string, error) {
 	errCount := 0
 	_, debug := os.LookupEnv("DEBUG")
-	sess, _ := session.NewSession(&aws.Config{})
+
+	configs := map[string]*aws.Config{}
+	if debug {
+		configs["config"] = aws.NewConfig().WithLogLevel(
+			aws.LogDebugWithRequestRetries |
+				aws.LogDebugWithRequestErrors |
+				aws.LogDebugWithHTTPBody,
+		)
+	} else {
+		configs["config"] = aws.NewConfig()
+	}
+
+	sess, _ := session.NewSession(configs["config"])
+	sessAssume := AssumeRoleWithSession(sess, os.Getenv("AWS_ASSUME_ROLE"))
 
 	for _, records := range s3Event.Records {
 		record := records.S3
@@ -134,42 +162,43 @@ func handler(ctx context.Context, s3Event events.S3Event) (string, error) {
 		fileName := fmt.Sprintf("/tmp/%s", filepath.Base(record.Object.Key))
 		logFile, errOsCreate := os.Create(fileName)
 		if errOsCreate != nil {
-			fmt.Printf("[ERROR] os.Create - %s", errOsCreate)
+			fmt.Println("[ERROR] os.Create: ", errOsCreate)
 			errCount++
 			continue
 		}
+		fmt.Printf("[INFO] FileName = %s \n", fileName)
 
 		defer logFile.Close()
 
-		downloader := s3manager.NewDownloader(sess)
+		downloader := s3manager.NewDownloader(sessAssume)
 		numBytes, errDownload := downloader.Download(logFile,
 			&s3.GetObjectInput{
 				Bucket: aws.String(record.Bucket.Name),
 				Key:    aws.String(record.Object.Key),
 			})
 		if errDownload != nil {
-			fmt.Printf("[ERROR] Download - %s", errDownload)
+			fmt.Println("[ERROR] Download: ", errDownload.Error())
 			errCount++
 			continue
 		}
-		fmt.Printf("[INFO] FileName2 = %s, Bucket = %s, Key = %s, Bytes = %d \n",
+		fmt.Printf("[INFO] FileName = %s, Bucket = %s, Key = %s, Bytes = %d \n",
 			fileName, record.Bucket.Name, record.Object.Key, numBytes)
 		logs, errReadGzFile := ReadGzFile(fileName)
 		if errReadGzFile != nil {
-			fmt.Printf("[ERROR] ReadGzFile - %s \n", errReadGzFile)
+			fmt.Println("[ERROR] ReadGzFile: ", errReadGzFile)
 			errCount++
 			continue
 		}
 
 		scanner := bufio.NewScanner(strings.NewReader(string(logs)))
 		for scanner.Scan() {
-			re := regexp.MustCompile(REGEXP_ALB)
+			re := regexp.MustCompile(regexpAlb)
 			log := Groupmap(scanner.Text(), re)
 
 			req := strings.Split(log["request"], " ")
 			method := req[0]
 			url := req[1]
-			reLogin, _ := regexp.Compile(REGEXP_LOGIN_URL)
+			reLogin, _ := regexp.Compile(regexpLoginURL)
 			submatches := reLogin.FindStringSubmatch(url)
 			if submatches == nil {
 				if debug {
@@ -189,24 +218,24 @@ func handler(ctx context.Context, s3Event events.S3Event) (string, error) {
 				log["timestamp"], method, url, log["elb_status_code"], submatches[1])
 
 			time, _ := time.Parse(time.RFC3339, log["timestamp"])
-			status, body, errPostMetric := PostMetric(fmt.Sprint("%s.login", DD_METRIC_NAME), time.Unix(), submatches[1])
+			status, body, errPostMetric := PostMetric(fmt.Sprintf("%s.login", ddMetricName), time.Unix(), submatches[1])
 			if errPostMetric != nil {
-				fmt.Printf("[ERROR] PostMetric - %s \n", errPostMetric)
+				fmt.Println("[ERROR] PostMetric: ", errPostMetric)
 				errCount++
 			}
 			if status != 202 {
+				fmt.Println("[ERROR] PostMetric status code is not 202: ", status)
 				errCount++
 			}
 
-			fmt.Printf("[INFO] Post datadog metric %s - %d %s \n", DD_METRIC_NAME, status, body)
+			fmt.Printf("[INFO] Post datadog metric %s - %d %s \n", ddMetricName, status, body)
 		}
 	}
 
-	if errCount == 0 {
-		return fmt.Sprintf("Success"), nil
-	} else {
-		return fmt.Sprintf("Error"), errors.New(fmt.Sprintf("[ERROR] Count: %d", errCount))
+	if 0 < errCount {
+		return "Failure", fmt.Errorf("[ERROR] Count: %d", errCount)
 	}
+	return "Success", nil
 }
 
 func main() {

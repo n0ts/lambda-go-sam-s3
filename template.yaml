@@ -10,49 +10,75 @@ Globals:
     MemorySize: 256
     Environment:
       Variables:
+        AWS_ASSUME_ROLE: <AWS Assume Role ARN>
         DD_HOST: <Datadog metric hostname>
         DD_API_KEY: <Datadog api key>
+        DEBUG: <If debug output, define THIS>
 
-Parameters:
-  LambdaRole:
-    Default: LambdaRole
-    Type: String
-  Bucket:
-    Default: <ALB access logs s3 bucket name>
-    Type: String
-  BucketPrefix:
-    Default: <ALB access logs s3 bucket prefix>
-    Type: String
+#Parameters:
+  #LambdaRole:
+  #  Default: <External IAM Role name>
+  #  Type: String
+  # Bucket:
+  #   Default: <ALB access logs s3 bucket name>
+  #   Type: String
+  # BucketPrefix:
+  #   Default: <ALB access logs s3 bucket prefix>
+  #   Type: String
 
 Resources:
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        -
+          PolicyName: "StsAssumeRole"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action: "sts:AssumeRole"
+                Resource: "*"
+
   S3GetFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
       CodeUri: main.zip
       Handler: main
       Runtime: go1.x
-      Role: !Join
-        - ''
-        - - 'arn:aws:iam::'
-          - !Ref 'AWS::AccountId'
-          - ':role/'
-          - !Ref LambdaRole
-      Events:
-         BucketEventCreate:
-           Type: S3 # More info about S3 Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#s3
-           Properties:
-             Bucket:
-               Ref: AlbLogBucket
-             Events:
-               - 's3:ObjectCreated:*'
-             Filter: # More info about S3 Notification Filter https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-s3-bucket-notificationconfiguration-config-filter.html
-               S3Key:
-                Rules:
-                  - Name: prefix
-                    Value:
-                      Ref: BucketPrefix
-                  - Name: suffix
-                    Value: '.gz'
+      Role: !GetAtt LambdaRole.Arn
+      # Role: !Join
+      #   - ''
+      #   - - 'arn:aws:iam::'
+      #     - !Ref 'AWS::AccountId'
+      #     - ':role/'
+      #     - !Ref LambdaRole
+      # Events:
+      #    BucketEventCreate:
+      #      Type: S3 # More info about S3 Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#s3
+      #      Properties:
+      #        Bucket:
+      #          Ref: AlbLogBucket
+      #        Events:
+      #          - 's3:ObjectCreated:*'
+      #        Filter: # More info about S3 Notification Filter https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-s3-bucket-notificationconfiguration-config-filter.html
+      #          S3Key:
+      #           Rules:
+      #             - Name: prefix
+      #               Value:
+      #                 Ref: BucketPrefix
+      #             - Name: suffix
+      #               Value: '.gz'
       # Environment: # More info about Env Vars: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#environment-object
       #   Variables:
       #     DEBUG: 1
@@ -65,20 +91,29 @@ Resources:
       LogGroupName: !Sub /aws/lambda/${S3GetFunction}
       RetentionInDays: 30
 
-  AlbLogBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName:
-        Ref: Bucket
+  # AlbLogBucket:
+  #   Type: AWS::S3::Bucket
+  #   Properties:
+  #     BucketName:
+  #       Ref: Bucket
 
 Outputs:
   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
   # Find out more about other implicit resources you can reference within SAM
   # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
-  S3GetFunction:
+  LambdaRoleName:
+    Description: "Lambda Name"
+    Value: !Ref LambdaRole
+  LambdaRoleArn:
+    Description: "Lambda Role"
+    Value: !GetAtt LambdaRole.Arn
+  S3GetFunctionName:
+    Description: "Lambda Function Name"
+    Value: !Ref S3GetFunction
+  S3GetFunctionArn:
     Description: "Lambda Function ARN"
     Value: !GetAtt S3GetFunction.Arn
 
-  AlbLogBucket:
-    Description: "S3 Bucket ARN"
-    Value: !GetAtt AlbLogBucket.Arn
+  # AlbLogBucket:
+  #   Description: "S3 Bucket ARN"
+  #   Value: !GetAtt AlbLogBucket.Arn

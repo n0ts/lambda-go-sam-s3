@@ -17,7 +17,19 @@ build: deps # Build
 
 .PHONY: deploy
 deploy: # Deploy
-	@sam deploy --template-file out.yaml --stack-name $(STACK_NAME)
+	@sam deploy --template-file out.yaml --stack-name $(STACK_NAME) \
+	  --capabilities CAPABILITY_IAM
+
+.PHONY: add_permission
+add_permission: # Add Permission Lambda Function
+	@aws --output table --region $(AWS_REGION) lambda add-permission \
+	  --function-name $(shell aws --region $(AWS_REGION) --output text \
+	                    cloudformation describe-stacks --stack-name $(STACK_NAME) \
+	  --query 'Stacks[0].Outputs[?OutputKey==`S3GetFunctionName`].OutputValue') \
+	  --statement-id s3-account --principal s3.amazonaws.com \
+	  --action lambda:InvokeFunction \
+	  --source-arn arn:aws:s3:::$(EXTERNAL_S3_BUCKET) \
+	  --source-account $(EXTERNAL_S3_ACCOUNT_ID)
 
 .PHONY: build_deploy
 build_deploy: # Build and Deploy
@@ -27,6 +39,10 @@ build_deploy: # Build and Deploy
 .PHONY: destroy
 destroy: # Destroy
 	@aws cloudformation delete-stack --stack-name $(STACK_NAME)
+
+.PHONY: fmt
+fmt: # Fmt
+	@go fmt *.go
 
 .PHONY: clean
 clean: # Clean
