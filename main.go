@@ -29,7 +29,7 @@ import (
 const regexpAlb = `(?P<type>.*?)\s(?P<timestamp>.*?)\s(?P<elb>.*?)\s(?P<client_port>.*?)\s(?P<target_port>.*?)\s(?P<request_processing_time>.*?)\s(?P<target_processing_time>.*?)\s(?P<response_processing_time>.*?)\s(?P<elb_status_code>.*?)\s(?P<target_status_code>.*?)\s(?P<received_bytes>.*?)\s(?P<send_bytes>.*?)\s"(?P<request>.*?)"\s"(?P<user_agent>.*?)"\s(?P<ssl_cipher>.*?)\s(?P<ssl_procotol>.*?)\s(?P<target_group_arn>.*?)\s"(?P<trace_id>.*?)"\s"(?P<domain_name>.*?)"\s"(?P<chosen_cert_an>.*?)"\s(?P<matched_rule_priority>.*?)\s(?P<request_creation_time>.*?)\s"(?P<actions_executed>.*?)"\s"(?P<redirect_url>.*?)"\s"(?P<error_reason>.*?)"`
 
 // regexpURL - Regular expression for service url
-const regexpURL = "^https://(.*):[^/]*/([^/]*)/([^/]*)"
+const regexpURL = "^https://(.*):[^/]*/([^/]*)/?([^/]*)"
 
 // ddMetricName - Datadog post metric name
 const ddMetricName = "test.metric"
