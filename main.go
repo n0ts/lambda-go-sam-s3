@@ -28,8 +28,8 @@ import (
 // https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-access-logs.html#access-log-entry-format
 const regexpAlb = `(?P<type>.*?)\s(?P<timestamp>.*?)\s(?P<elb>.*?)\s(?P<client_port>.*?)\s(?P<target_port>.*?)\s(?P<request_processing_time>.*?)\s(?P<target_processing_time>.*?)\s(?P<response_processing_time>.*?)\s(?P<elb_status_code>.*?)\s(?P<target_status_code>.*?)\s(?P<received_bytes>.*?)\s(?P<send_bytes>.*?)\s"(?P<request>.*?)"\s"(?P<user_agent>.*?)"\s(?P<ssl_cipher>.*?)\s(?P<ssl_procotol>.*?)\s(?P<target_group_arn>.*?)\s"(?P<trace_id>.*?)"\s"(?P<domain_name>.*?)"\s"(?P<chosen_cert_an>.*?)"\s(?P<matched_rule_priority>.*?)\s(?P<request_creation_time>.*?)\s"(?P<actions_executed>.*?)"\s"(?P<redirect_url>.*?)"\s"(?P<error_reason>.*?)"`
 
-// regexpLoginURL - Regular expression for service login url
-const regexpLoginURL = "https://.*:.*/([^/].*)/login"
+// regexpURL - Regular expression for service url
+const regexpURL = "^https://(.*):[^/]*/([^/]*)/([^/]*)"
 
 // ddMetricName - Datadog post metric name
 const ddMetricName = "test.metric"
@@ -194,11 +194,11 @@ func handler(ctx context.Context, s3Event events.S3Event) (string, error) {
 			req := strings.Split(log["request"], " ")
 			method := req[0]
 			url := req[1]
-			reLogin, _ := regexp.Compile(regexpLoginURL)
-			submatches := reLogin.FindStringSubmatch(url)
+			reURL, _ := regexp.Compile(regexpURL)
+			submatches := reURL.FindStringSubmatch(url)
 			if submatches == nil {
 				if debug {
-					fmt.Printf("[DEBUG] %s request uri is not login url - %s \n", log["timestamp"], url)
+					fmt.Printf("[DEBUG] %s request uri is not url - %s \n", log["timestamp"], url)
 				}
 				continue
 			}
@@ -214,7 +214,7 @@ func handler(ctx context.Context, s3Event events.S3Event) (string, error) {
 				log["timestamp"], method, url, log["elb_status_code"], submatches[1])
 
 			time, _ := time.Parse(time.RFC3339, log["timestamp"])
-			status, body, errPostMetric := PostMetric(fmt.Sprintf("%s.login", ddMetricName), time.Unix(), submatches[1])
+			status, body, errPostMetric := PostMetric(fmt.Sprintf("%s.%s", ddMetricName, submatches[1]), time.Unix(), submatches[2])
 			if errPostMetric != nil {
 				fmt.Println("[ERROR] PostMetric: ", errPostMetric)
 				errCount++
