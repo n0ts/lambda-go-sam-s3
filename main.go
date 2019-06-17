@@ -50,26 +50,22 @@ type ddParams struct {
 
 // ReadGzFile - Read gzipped file
 func ReadGzFile(filename string) ([]byte, error) {
-	fmt.Sprintf("1 \n")
 	fi, err := os.Open(filename)
 	if err != nil {
 		return nil, err
 	}
 	defer fi.Close()
-	fmt.Sprintf("2 \n")
 
 	fz, err := gzip.NewReader(fi)
 	if err != nil {
 		return nil, err
 	}
 	defer fz.Close()
-	fmt.Sprintf("3 \n")
 
 	s, err := ioutil.ReadAll(fz)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Sprintf("4 \n")
 	return s, nil
 }
 
